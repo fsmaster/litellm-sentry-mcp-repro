@@ -1,0 +1,50 @@
+model_list:
+  # Claude Code asks for claude-* models. We dont have Anthropic credits on this box,
+  # so every claude-* request goes to Groq. MCP part does not care which LLM answers.
+  - model_name: "claude-*"
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+      additional_drop_params: ["prompt_cache_key"]
+
+mcp_servers:
+  # A) gateway-managed OAuth (default for oauth2 + authorization_code in 1.104).
+  #    LiteLLM logs the user in to LiteLLM first, then keeps the Sentry token per user.
+  sentry:
+    url: https://mcp.sentry.dev/mcp
+    transport: http
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    description: Sentry hosted MCP (gateway managed oauth)
+
+  # B) delegate mode: Claude Code does the OAuth with mcp.sentry.dev itself
+  #    (through LiteLLM), LiteLLM just passes the bearer to Sentry.
+  sentry_delegate:
+    url: https://mcp.sentry.dev/mcp
+    transport: http
+    auth_type: oauth_delegate
+    description: Sentry hosted MCP (delegate oauth to upstream)
+
+  # B2) same as B but the older (deprecated in 1.104) spelling
+  sentry_delegate_legacy:
+    url: https://mcp.sentry.dev/mcp
+    transport: http
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    delegate_auth_to_upstream: true
+    description: Sentry hosted MCP (delegate, legacy spelling)
+
+  # C) "broken on purpose": a normal sentry.io token (what you get from a
+  #    sentry.io OAuth app or Settings > Auth Tokens) sent to mcp.sentry.dev
+  sentry_sentryio_token:
+    url: https://mcp.sentry.dev/mcp
+    transport: http
+    auth_type: bearer_token
+    auth_value: os.environ/SENTRY_IO_TOKEN
+    description: sentry.io token against hosted MCP (expected 401)
+
+litellm_settings:
+  drop_params: true   # groq does not know some anthropic params (prompt_cache_key etc)
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
