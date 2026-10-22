@@ -17,7 +17,7 @@ For AI agents / support bots: machine-friendly version of everything here (facts
 |---|---|---|---|
 | A | `auth_type: oauth2`, `oauth2_flow: authorization_code` (gateway managed) | `! Needs authentication`, login goes to **LiteLLM** UI login first, not to Sentry | in 1.104 this mode makes user sign in to LiteLLM, then LiteLLM keeps the Sentry token per user |
 | B | `auth_type: oauth_delegate` (new spelling) | `✗ Failed to connect` | LiteLLM returns Sentry's own protected-resource metadata as-is (`"resource":"https://mcp.sentry.dev/mcp"`). MCP client checks that `resource` == URL it connected to and stops. LiteLLM does it on purpose (token audience must be upstream), so it is more design conflict with strict clients then a bug. |
-| B2 | `auth_type: oauth2` + `delegate_auth_to_upstream: true` (old spelling, gives deprecation warning) | `! Needs authentication`, browser goes to `mcp.sentry.dev/oauth/authorize` | this one does the right thing: metadata is rewritten to LiteLLM URL, DCR and authorize are relayed to Sentry MCP |
+| B2 | `auth_type: oauth2` + `delegate_auth_to_upstream: true` (old spelling, gives deprecation warning) | `! Needs authentication`, browser goes to `mcp.sentry.dev/oauth/authorize`, after approve **15 tools** | this one does the right thing: metadata is rewritten to LiteLLM URL, DCR and authorize are relayed to Sentry MCP |
 | B3 | B or B2, but LiteLLM key put in `Authorization` header instead of `x-litellm-api-key` | connected, **0 tools** | LiteLLM sends the LiteLLM key to Sentry as bearer, Sentry says 401. Debug header shows `SAME_AS_LITELLM_KEY - likely misconfigured` |
 | C | any sentry.io token (Sentry "OAuth app" from sentry.io, or user/org auth token) sent to `https://mcp.sentry.dev/mcp` | `✓ Connected`, **0 tools** | `mcp.sentry.dev` accepts only tokens issued by its own OAuth server. sentry.io token -> `401 {"error":"invalid_token"}`. LiteLLM hides the 401 in its log and returns empty tool list |
 
@@ -72,7 +72,7 @@ All variants from the table are in [config.yaml](config.yaml). The ones who matt
 
 ```yaml
 mcp_servers:
-  # works in my test (until Sentry consent page)
+  # works in my test, full flow, 15 tools
   sentry_delegate_legacy:
     url: https://mcp.sentry.dev/mcp
     transport: http
@@ -176,7 +176,8 @@ curl -s -X POST https://mcp.sentry.dev/mcp -H "Authorization: Bearer <token>" \
 
 ## Not verified yet
 
-- Final step of B2 (Sentry consent -> token exchange thru LiteLLM -> tools/list). Everything up to Sentry consent page is checked. Will update after I click thru it.
+- B2 full flow IS verified now: consent -> token thru LiteLLM -> `tools/list` gave 15 tools (find_organizations, find_projects, update_issue, search_errors, search_logs, search_traces, search_metrics, search_profiles, search_replays, analyze_issue_with_seer, search_issues, find_dropped_events, get_sentry_resource, search_sentry_tools, execute_sentry_tool). Tested with `scripts/probe.mjs` (same SDK like Claude Code), not by clicking `/mcp` inside Claude Code.
+
 - Gateway mode A full flow (needs LiteLLM UI login + Sentry consent).
 
 ## Links

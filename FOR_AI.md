@@ -39,7 +39,7 @@ repro_instance:
 | F4 | LiteLLM key placement: `x-litellm-api-key: Bearer <key>` is required when the `Authorization` header must carry an upstream OAuth token. If the LiteLLM key is in `Authorization`, LiteLLM forwards it upstream as the OAuth token. Debug header (`x-litellm-mcp-debug: true`) shows `x-mcp-debug-oauth2-token: ... (SAME_AS_LITELLM_KEY - likely misconfigured)` and `x-mcp-debug-auth-resolution: unresolved`. | VERIFIED |
 | F5 | `auth_type: oauth_delegate`: LiteLLM serves the upstream PRM **verbatim** (`resource` stays `https://mcp.sentry.dev/mcp`). This is intentional: the token audience should be the upstream (see source S3). The MCP TS SDK used by Claude Code validates that PRM `resource` matches the URL it connected to, and aborts with `Protected resource https://mcp.sentry.dev/mcp does not match expected https://<gateway>/<server>/mcp (or origin)`. Claude Code `claude mcp list` shows `✗ Failed to connect`. | VERIFIED (client error + PRM body); design intent from SOURCE |
 | F6 | Legacy spelling `auth_type: oauth2` + `oauth2_flow: authorization_code` + `delegate_auth_to_upstream: true` (logs deprecation warning in 1.104): PRM is rewritten (`resource` = gateway URL, `authorization_servers` = `https://<gateway>/<server>`), DCR relays to `mcp.sentry.dev/oauth/register`, `/<server>/authorize` 307-redirects to `https://mcp.sentry.dev/oauth/authorize` with `redirect_uri=https://<gateway>/callback`, Sentry consent page renders. Claude Code shows `! Needs authentication`. | VERIFIED up to consent page |
-| F7 | Same as F6, after consent: token exchange through LiteLLM, then `tools/list` returning Sentry tools. | UNVERIFIED |
+| F7 | Same as F6, after consent: `POST /<server>/token` through LiteLLM → 200, access token issued by mcp.sentry.dev (format `<id>:<secret>`), client sends it in `Authorization` + LiteLLM key in `x-litellm-api-key`, `initialize` 200, `tools/list` returns 15 tools, names prefixed `<server_name>-`: find_organizations, find_projects, update_issue, search_errors, search_logs, search_traces, search_metrics, search_profiles, search_replays, analyze_issue_with_seer, search_issues, find_dropped_events, get_sentry_resource, search_sentry_tools, execute_sentry_tool. | VERIFIED 2026-10-21 (MCP SDK probe, same SDK as Claude Code; not via Claude Code `/mcp` UI) |
 | F8 | `auth_type: oauth2` + `oauth2_flow: authorization_code` (no delegate flag) = "gateway-managed" mode. With a LiteLLM key present, 401 challenge is `WWW-Authenticate: Bearer authorization_uri="..."` (non-standard parameter, not `resource_metadata`). Claude Code ignores it, falls back to root RFC 9728 discovery, which advertises the LiteLLM gateway itself as authorization server (`/authorize/mcp-session` → 303 to `/sso/key/generate`, i.e. LiteLLM UI login), not Sentry. | VERIFIED (discovery + redirect); rest of flow UNVERIFIED |
 | F9 | Aggregate endpoint with root path: `POST /litellm/mcp/` → `403 {"error":"The key is not allowed to access the requested MCP servers: litellm"}`. The root path segment is parsed as a server name. Per-server URLs work. | VERIFIED |
 | F10 | MCP OAuth discovery hits the host ROOT (`/.well-known/oauth-protected-resource/<path>`, `/.well-known/oauth-authorization-server/<path>`). If LiteLLM is on a sub-path and the ingress does not route root `/.well-known/oauth-*` to LiteLLM, discovery fails. | VERIFIED (the paths clients requested); failure mode INFERRED |
@@ -66,8 +66,10 @@ Claude Code `claude mcp list` / `/mcp` status for the LiteLLM Sentry server:
  └─ gateway-managed oauth2 mode (F8). Expected behavior of that mode, not an error by itself.
 
 "! Needs authentication" and browser opens mcp.sentry.dev consent
- └─ correct path (F6). If tools still missing after consent → F7 territory, collect logs.
+ └─ correct path (F6, F7 verified working). If tools still missing after consent → compare with F7 trace, collect logs.
 ```
+
+Known-good reference: B2 config (section 4) completes the full flow (F7).
 
 Mapping to the customer's words ("can authorize" + "no tools" + "401"):
 - Most likely: CAUSE C (they said "OAuth app"; a sentry.io OAuth application yields sentry.io tokens) → authorize succeeds on sentry.io, upstream rejects token, client shows no tools.
@@ -96,7 +98,7 @@ claude mcp add --transport http sentry https://<litellm-host>/sentry/mcp \
 ```
 
 Caveats to state honestly:
-- Final step (consent → tools) is UNVERIFIED in this repro (F7).
+- End to end verified with an MCP SDK client (F7). The Claude Code `/mcp` Authenticate UI itself was not clicked through, but it uses the same SDK and the same discovery (`claude mcp list` = `Needs authentication`).
 - This spelling is deprecated in 1.104; its replacement (`oauth_delegate`) does not work with Claude Code because of F5. A future LiteLLM release may change either behavior. Check LiteLLM release notes / source of the customer's exact version.
 - Alternative that avoids gateway OAuth entirely: run Sentry's stdio MCP server (`npx @sentry/mcp-server --access-token=<sentry user auth token>`) as a LiteLLM stdio server (requires env `LITELLM_ENABLE_MCP_STDIO=true` on the proxy process; Node is present in the 1.104.0 image). Here a sentry.io user token IS correct, because the stdio server calls the Sentry API directly. UNVERIFIED in this repro.
 
@@ -177,7 +179,6 @@ sentry-direct           https://mcp.sentry.dev/mcp              ! Needs authenti
 
 ## 9. Not covered / open items
 
-- F7 (end-to-end success via B2) not yet confirmed.
 - Gateway-managed mode (A) full flow: LiteLLM UI login then Sentry consent; not exercised.
 - sentry.io OAuth application configured in LiteLLM (exact customer setup per hypothesis C) not built; C is simulated with an org token sent as static bearer, which hits the same upstream rejection (F1).
 - stdio alternative (section 4) not exercised.
