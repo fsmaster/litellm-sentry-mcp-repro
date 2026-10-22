@@ -9,12 +9,14 @@ Customer setup we try to match:
 
 I built same thing on my box and tried every auth mode LiteLLM 1.104 has for upstream MCP servers. Live instance for testing: `https://fsmaster.com/litellm` (LiteLLM behind nginx, root path `/litellm`).
 
+For AI agents / support bots: machine-friendly version of everything here (facts, status, decision tree, LiteLLM source pointers) is in [FOR_AI.md](FOR_AI.md).
+
 ## Short version
 
 | # | LiteLLM `mcp_servers` auth for Sentry | What Claude Code shows | Why |
 |---|---|---|---|
 | A | `auth_type: oauth2`, `oauth2_flow: authorization_code` (gateway managed) | `! Needs authentication`, login goes to **LiteLLM** UI login first, not to Sentry | in 1.104 this mode makes user sign in to LiteLLM, then LiteLLM keeps the Sentry token per user |
-| B | `auth_type: oauth_delegate` (new spelling) | `✗ Failed to connect` | LiteLLM returns Sentry's own protected-resource metadata as-is (`"resource":"https://mcp.sentry.dev/mcp"`). MCP client checks that `resource` == URL it connected to and stops. |
+| B | `auth_type: oauth_delegate` (new spelling) | `✗ Failed to connect` | LiteLLM returns Sentry's own protected-resource metadata as-is (`"resource":"https://mcp.sentry.dev/mcp"`). MCP client checks that `resource` == URL it connected to and stops. LiteLLM does it on purpose (token audience must be upstream), so it is more design conflict with strict clients then a bug. |
 | B2 | `auth_type: oauth2` + `delegate_auth_to_upstream: true` (old spelling, gives deprecation warning) | `! Needs authentication`, browser goes to `mcp.sentry.dev/oauth/authorize` | this one does the right thing: metadata is rewritten to LiteLLM URL, DCR and authorize are relayed to Sentry MCP |
 | B3 | B or B2, but LiteLLM key put in `Authorization` header instead of `x-litellm-api-key` | connected, **0 tools** | LiteLLM sends the LiteLLM key to Sentry as bearer, Sentry says 401. Debug header shows `SAME_AS_LITELLM_KEY - likely misconfigured` |
 | C | any sentry.io token (Sentry "OAuth app" from sentry.io, or user/org auth token) sent to `https://mcp.sentry.dev/mcp` | `✓ Connected`, **0 tools** | `mcp.sentry.dev` accepts only tokens issued by its own OAuth server. sentry.io token -> `401 {"error":"invalid_token"}`. LiteLLM hides the 401 in its log and returns empty tool list |
